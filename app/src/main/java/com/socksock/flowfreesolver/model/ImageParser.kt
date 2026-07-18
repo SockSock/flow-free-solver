@@ -5,9 +5,6 @@ import android.util.Log
 import org.opencv.android.Utils
 import org.opencv.core.CvType
 import org.opencv.core.Mat
-import org.opencv.core.MatOfPoint
-import org.opencv.core.Point
-import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 
 class ImageParser {
@@ -20,65 +17,104 @@ class ImageParser {
     }
 
     private fun getRowsAndColsFromGrid(image: Mat): Pair<Int, Int> {
+        val rgb = Mat()
+        Imgproc.cvtColor(image, rgb, Imgproc.COLOR_RGBA2RGB)
         val grey = Mat()
-        Imgproc.cvtColor(image, grey, Imgproc.COLOR_RGBA2GRAY)
+        Imgproc.cvtColor(rgb, grey, Imgproc.COLOR_RGB2GRAY)
 
-        val thresh = Mat()
-        Imgproc.adaptiveThreshold(
-            grey,
-            thresh,
-            255.0,
-            Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
-            Imgproc.THRESH_BINARY_INV,
-            11,
-            2.0
-        )
+        val mask = Mat()
+        Imgproc.threshold(grey, mask, 20.0, 255.0, Imgproc.THRESH_BINARY)
 
-        val scaleH = maxOf(1, thresh.cols() / 30)
-        val scaleV = maxOf(1, thresh.rows() / 30)
+        val fullWidth = mask.cols()
+        val fullHeight = mask.rows()
 
-        val horizKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(scaleH.toDouble(), 1.0))
-        val vertKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(1.0, scaleV.toDouble()))
-
-        val horizLines = Mat()
-        val vertLines = Mat()
-        Imgproc.morphologyEx(thresh, horizLines, Imgproc.MORPH_OPEN, horizKernel,
-            Point(-1.0, -1.0), 2)
-        Imgproc.morphologyEx(thresh, vertLines, Imgproc.MORPH_OPEN, vertKernel, Point(-1.0, -1.0), 2)
-
-        val contoursH = ArrayList<MatOfPoint>()
-        val contoursV = ArrayList<MatOfPoint>()
-        val hierarchy = Mat()
-
-        Imgproc.findContours(horizLines, contoursH, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
-        Imgproc.findContours(vertLines, contoursV, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
-
-        val minLineLength = 20
-
-        val validHLines = contoursH.count { contour ->
-            val points = contour.toArray()
-            val width = points.maxOf { it.x } - points.minOf { it.x }
-
-            width > minLineLength
+        fun rowBrightFraction(y: Int): Double {
+            val row = mask.row(y)
+            val sum = org.opencv.core.Core.sumElems(row).`val`[0] / 255.0
+            return sum / fullWidth
         }
 
-        val validVLines = contoursV.count { contour ->
-            val points = contour.toArray()
-            val height = points.maxOf { it.y } - points.minOf { it.y }
+        val rowThreshold = 0.9
+        val candidateRows = (0 until fullHeight).filter { rowBrightFraction(it) > rowThreshold }
 
-            height > minLineLength
+        if (candidateRows.isEmpty()) {
+            rgb.release(); grey.release(); mask.release()
+            return Pair(0, 0)
         }
 
-        val numRows = maxOf(0, validHLines - 1)
-        val numColumns = maxOf(0, validVLines - 1)
+        fun clusterPositions(candidates: List<Int>, minSpacing: Int): List<Int> {
+            val positions = mutableListOf<Int>()
+            var clusterStart = candidates[0]
+            var prev = candidates[0]
+            for (idx in candidates.drop(1)) {
+                if (idx - prev > minSpacing) {
+                    positions.add((clusterStart + prev) / 2)
+                    clusterStart = idx
+                }
+                prev = idx
+            }
+            positions.add((clusterStart + prev) / 2)
+            return positions
+        }
 
+        fun pruneOutlierPositions(positions: List<Int>): List<Int> {
+            if (positions.size < 3) return positions
+            val gaps = positions.zipWithNext { a, b -> b - a }
+            val sortedGaps = gaps.sorted()
+            val medianGap = sortedGaps[sortedGaps.size / 2].toDouble()
+
+            val pruned = positions.toMutableList()
+            while (pruned.size > 2) {
+                val firstGap = pruned[1] - pruned[0]
+                val lastGap = pruned[pruned.size - 1] - pruned[pruned.size - 2]
+                val firstBad = firstGap > medianGap * 1.5 || firstGap < medianGap * 0.5
+                val lastBad = lastGap > medianGap * 1.5 || lastGap < medianGap * 0.5
+                if (lastBad) {
+                    pruned.removeAt(pruned.size - 1)
+                } else if (firstBad) {
+                    pruned.removeAt(0)
+                } else {
+                    break
+                }
+            }
+            return pruned
+        }
+
+        val horizontalPositions = pruneOutlierPositions(clusterPositions(candidateRows, maxOf(1, fullHeight / 100)))
+
+        if (horizontalPositions.size < 2) {
+            rgb.release(); grey.release(); mask.release()
+            return Pair(0, 0)
+        }
+
+        val gridTop = horizontalPositions.first()
+        val gridBottom = horizontalPositions.last()
+        val gridRowSpan = gridBottom - gridTop
+        val subMask = Mat(mask, org.opencv.core.Rect(0, gridTop, fullWidth, gridRowSpan))
+
+        fun colBrightFraction(x: Int): Double {
+            val col = subMask.col(x)
+            val sum = org.opencv.core.Core.sumElems(col).`val`[0] / 255.0
+            return sum / gridRowSpan
+        }
+
+        val colThreshold = 0.9
+        val candidateCols = (0 until fullWidth).filter { colBrightFraction(it) > colThreshold }
+
+        if (candidateCols.isEmpty()) {
+            rgb.release(); grey.release(); mask.release(); subMask.release()
+            return Pair(0, 0)
+        }
+
+        val verticalPositions = pruneOutlierPositions(clusterPositions(candidateCols, maxOf(1, fullWidth / 100)))
+
+        val numRows = maxOf(0, horizontalPositions.size - 1)
+        val numColumns = maxOf(0, verticalPositions.size - 1)
+
+        rgb.release()
         grey.release()
-        thresh.release()
-        horizKernel.release()
-        vertKernel.release()
-        horizLines.release()
-        vertLines.release()
-        hierarchy.release()
+        mask.release()
+        subMask.release()
 
         return Pair(numRows, numColumns)
     }
