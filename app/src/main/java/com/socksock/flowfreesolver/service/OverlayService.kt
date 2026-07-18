@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
+import com.socksock.flowfreesolver.model.ImageParser
 import com.socksock.flowfreesolver.screenshot.ScreenshotManager
 import com.socksock.flowfreesolver.view.OverlayView
 
@@ -22,6 +23,8 @@ class OverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var overlayView: OverlayView
     private lateinit var screenshotManager: ScreenshotManager
+
+    private val parser = ImageParser()
 
     override fun onCreate() {
         super.onCreate()
@@ -59,7 +62,7 @@ class OverlayService : Service() {
                 resultCode = resultCode,
                 projectionData = projectionData
             ) { bitmap ->
-
+                parser.parseImage(bitmap)
             }
         }
 
