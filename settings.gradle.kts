@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Flow Free Solver"
 include(":app")
+include(":opencv")

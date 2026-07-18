@@ -4,11 +4,13 @@ import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import com.socksock.flowfreesolver.service.OverlayService
+import org.opencv.android.OpenCVLoader
 
 class MainActivity : ComponentActivity() {
     private var permissionFlowStarted = false
@@ -50,6 +52,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (OpenCVLoader.initLocal()) {
+            Log.d("OpenCV_Status", "OpenCV loaded successfully.")
+        } else {
+            Log.e("OpenCV_Status", "Could not load OpenCV library.")
+        }
     }
 
 
