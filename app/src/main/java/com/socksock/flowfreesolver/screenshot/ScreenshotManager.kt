@@ -30,42 +30,37 @@ class ScreenshotManager(
     private val densityDpi: Int
 
     private var latestBitmap: Bitmap? = null
+    private var isClosed = false
 
     init {
         val windowManager =
             context.getSystemService(WindowManager::class.java)
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val bounds = windowManager.currentWindowMetrics.bounds
-
             width = bounds.width()
             height = bounds.height()
         } else {
             @Suppress("DEPRECATION")
             val display = windowManager.defaultDisplay
-
             val metrics = DisplayMetrics()
             @Suppress("DEPRECATION")
             display.getRealMetrics(metrics)
-
             width = metrics.widthPixels
             height = metrics.heightPixels
         }
-
         densityDpi = context.resources.displayMetrics.densityDpi
-
         val projectionManager =
             context.getSystemService(MediaProjectionManager::class.java)
-
         mediaProjection =
             requireNotNull(
-                projectionManager.getMediaProjection(
-                    resultCode,
-                    projectionData
-                )
-            ) {
-                "Failed to create MediaProjection."
+                projectionManager.getMediaProjection(resultCode, projectionData)
+            ) { "Failed to create MediaProjection." }
+
+        mediaProjection.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                close()
             }
+        }, Handler(Looper.getMainLooper()))
 
         imageReader = ImageReader.newInstance(
             width,
@@ -73,7 +68,6 @@ class ScreenshotManager(
             android.graphics.PixelFormat.RGBA_8888,
             2
         )
-
         virtualDisplay =
             requireNotNull(
                 mediaProjection.createVirtualDisplay(
@@ -86,47 +80,38 @@ class ScreenshotManager(
                     null,
                     null
                 )
-            ) {
-                "Failed to create VirtualDisplay."
-            }
+            ) { "Failed to create VirtualDisplay." }
     }
 
     fun capture() {
-        imageReader.setOnImageAvailableListener({ reader ->
-            val image = reader.acquireLatestImage()
-                ?: return@setOnImageAvailableListener
-
+        Handler(Looper.getMainLooper()).postDelayed({
+            var image: android.media.Image? = null
             try {
+                image = imageReader.acquireLatestImage()
+                if (image == null) {
+                    return@postDelayed
+                }
                 val plane = image.planes[0]
                 val buffer = plane.buffer
                 val pixelStride = plane.pixelStride
                 val rowStride = plane.rowStride
                 val rowPadding = rowStride - pixelStride * width
-
                 val bitmap = createBitmap(width + rowPadding / pixelStride, height)
-
                 bitmap.copyPixelsFromBuffer(buffer)
-
                 latestBitmap?.recycle()
-
-                latestBitmap = Bitmap.createBitmap(
-                    bitmap,
-                    0,
-                    0,
-                    width,
-                    height
-                )
-
+                latestBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
                 bitmap.recycle()
-
                 onScreenshotCaptured(latestBitmap!!)
+            } catch (e: Exception) {
             } finally {
-                image.close()
+                image?.close()
             }
-        }, Handler(Looper.getMainLooper()))
+        }, 200)
     }
 
     fun close() {
+        if (isClosed) return
+        isClosed = true
         imageReader.close()
         virtualDisplay.release()
         mediaProjection.stop()

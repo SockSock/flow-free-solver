@@ -43,20 +43,15 @@ class OverlayService : Service() {
         stardId: Int
     ): Int {
         val resultCode =
-            intent?.getIntExtra(EXTRA_RESULT_CODE, -1) ?: -1
-
+            intent?.getIntExtra(EXTRA_RESULT_CODE, Int.MIN_VALUE) ?: Int.MIN_VALUE
         val projectionData =
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                intent?.getParcelableExtra(
-                    EXTRA_PROJECTION_DATA,
-                    Intent::class.java
-                )
+                intent?.getParcelableExtra(EXTRA_PROJECTION_DATA, Intent::class.java)
             } else {
                 @Suppress("DEPRECATION")
                 intent?.getParcelableExtra(EXTRA_PROJECTION_DATA)
             }
-
-        if (resultCode != -1 && projectionData != null) {
+        if (resultCode != Int.MIN_VALUE && projectionData != null) {
             screenshotManager = ScreenshotManager(
                 context = this,
                 resultCode = resultCode,
@@ -65,7 +60,6 @@ class OverlayService : Service() {
                 parser.parseImage(bitmap)
             }
         }
-
         return START_STICKY
     }
 
