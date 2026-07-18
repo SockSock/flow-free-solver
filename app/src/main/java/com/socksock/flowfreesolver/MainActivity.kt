@@ -6,7 +6,6 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
-import kotlin.jvm.java
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -15,10 +14,19 @@ class MainActivity : ComponentActivity() {
         if (!Settings.canDrawOverlays(this)) {
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                "package:&packageName".toUri()
+                "package:$packageName".toUri()
             )
             startActivity(intent)
         } else {
+            startOverlay()
+            finish()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        if (Settings.canDrawOverlays(this)) {
             startOverlay()
         }
     }
